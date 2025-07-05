@@ -5,7 +5,6 @@ import logging
 import time
 from connection import Connection
 from group import Group
-from thought_bubble import ThoughtBubble
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)
@@ -24,9 +23,6 @@ class Node(QGraphicsItem, QObject):
         # Tags and group membership
         self.tags = set()          # Set of tags assigned to this node
         self.group_id = None       # Group this node belongs to (None if not in a group)
-
-        # Track thought bubbles
-        self.thoughts = []         # List of thought bubbles attached to this node
 
         # Create text item as a child
         self.text_item = QGraphicsTextItem(text, self)
@@ -211,13 +207,6 @@ class Node(QGraphicsItem, QObject):
                 if group:
                     group.update_spines()
 
-            # Update positions of thought bubbles when node moves
-            if hasattr(self, 'thoughts') and self.thoughts:
-                import time
-                timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-                logger.debug(f"[{timestamp}] Node '{self.text}' moved, updating {len(self.thoughts)} thought bubbles")
-                self._repositionThoughts()
-
         # everything else: let the default behavior run
         return super().itemChange(change, value)
 
@@ -228,10 +217,6 @@ class Node(QGraphicsItem, QObject):
         # Always include edit action
         edit_action = menu.addAction("Edit Text")
         edit_action.triggered.connect(lambda: self._edit_text())
-
-        # Add Note action
-        add_note_action = menu.addAction("Add Note...")
-        add_note_action.triggered.connect(lambda: self._add_note())
 
         # Check if there are multiple nodes selected
         selected_nodes = []
@@ -749,122 +734,6 @@ class Node(QGraphicsItem, QObject):
         if self.scene():
             self.scene().update()
 
-    def addThought(self, text):
-        """Add a thought bubble to the node and track it"""
-        if not self.scene():
-            return
-
-        # Create the thought bubble
-        bubble = ThoughtBubble(self, text)
-
-        # Set Z-value to be higher than connections (-1) but lower than node text
-        # Node has Z-value of 1, so set bubble to 0.5
-        bubble.setZValue(self.zValue() - 0.5)
-
-        # Add the bubble to our list
-        self.thoughts.append(bubble)
-
-        # Reposition all thought bubbles
-        self._repositionThoughts()
-
-        logger.debug(f"Added thought bubble to node '{self.text}' with text: {text}")
-
-        return bubble
-
-    def _repositionThoughts(self, min_padding=ThoughtBubble.DEFAULT_MIN_PADDING, 
-                          angle_spread=ThoughtBubble.DEFAULT_ANGLE_SPREAD):
-        """
-        Fan out thoughts around the top of this node with collision avoidance.
-
-        Args:
-            min_padding (int): Minimum padding between bubbles
-            angle_spread (int): Angle spread in degrees for the fan layout
-        """
-        import math
-        import time
-
-        count = len(self.thoughts)
-        if count == 0:
-            return
-
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        logger.debug(f"[{timestamp}] Repositioning {count} thought bubbles for node '{self.text}'")
-
-        # Convert angle_spread from degrees to radians and calculate start/end angles
-        half_spread = math.radians(angle_spread / 2)
-        # Center the fan above the node (negative y is up)
-        center_angle = -math.pi/2  # -90 degrees (straight up)
-        start = center_angle - half_spread
-        end = center_angle + half_spread
-
-        # Sort bubbles by creation time to ensure consistent ordering
-        sorted_bubbles = sorted(self.thoughts, key=lambda b: b.creation_time)
-
-        # First pass: position all bubbles in a fan layout
-        for i, bubble in enumerate(sorted_bubbles):
-            # Calculate angle based on position in the array
-            angle = start + (end-start)*(i/(count-1 if count>1 else 1))
-
-            # Get node bounding rectangle in scene coordinates
-            nb = self.sceneBoundingRect()
-
-            # Calculate base distance from node center
-            # Use node height, bubble radius, and padding
-            # Reduced multiplier from 1.2 to 0.8 to bring bubbles closer to node
-            base_dist = nb.height()/2 + bubble.radius*0.8 + min_padding
-
-            # For multiple bubbles, add some radial distance based on index
-            # This helps prevent initial overlaps
-            if count > 1:
-                # Add more distance for bubbles further from the center
-                # Reduced multiplier from 2 to 1.5 to keep bubbles closer together
-                radial_offset = abs(i - (count-1)/2) * min_padding * 1.5
-                dist = base_dist + radial_offset
-            else:
-                dist = base_dist
-
-            # Calculate position
-            x = nb.center().x() + math.cos(angle)*dist
-            y = nb.center().y() + math.sin(angle)*dist
-
-            # Set the bubble's position
-            bubble.setPos(x, y)
-
-            # Store initial position for logging
-            bubble.final_x = x
-            bubble.final_y = y
-            bubble.padding_used = min_padding
-
-            logger.debug(f"[{timestamp}] Initial position for bubble id={bubble.bubble_id}: ({x:.1f}, {y:.1f}), angle={math.degrees(angle):.1f}°")
-
-        # Second pass: resolve collisions
-        # Process bubbles in order, ensuring each one doesn't overlap with previously positioned ones
-        processed_bubbles = []
-
-        for bubble in sorted_bubbles:
-            # Check and resolve collisions with already processed bubbles
-            collision_resolved = bubble.adjust_position_for_collision(processed_bubbles, min_padding)
-
-            if collision_resolved:
-                logger.debug(f"[{timestamp}] Collision resolved for bubble id={bubble.bubble_id}, final position: ({bubble.final_x:.1f}, {bubble.final_y:.1f})")
-            else:
-                logger.debug(f"[{timestamp}] No collision detected for bubble id={bubble.bubble_id}")
-
-            # Add this bubble to the processed list
-            processed_bubbles.append(bubble)
-
-        logger.debug(f"[{timestamp}] Completed repositioning {count} thought bubbles for node '{self.text}'")
-
-    def _add_note(self):
-        """Add a thought bubble note to the node via dialog"""
-        if not self.scene():
-            return
-
-        # Prompt for note text
-        text, ok = QInputDialog.getText(None, "Add Note", "Enter note text:")
-        if ok and text:
-            # Use the addThought method to create and track the bubble
-            self.addThought(text)
 
     def mousePressEvent(self, event):
         """Handle mouse press event"""

@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QGraphicsScene, QGraphicsView, QWidget, 
     QVBoxLayout, QHBoxLayout, QLabel, QToolButton, QMenuBar, QMenu,
     QSizePolicy, QRubberBand, QComboBox, QCheckBox, QToolBar, QFrame,
-    QFileDialog, QMessageBox, QInputDialog, QLineEdit
+    QFileDialog, QMessageBox, QInputDialog, QLineEdit, QPushButton
 )
 from PySide6.QtCore import Qt, QPointF, QPoint, QTimer, QRectF
 from PySide6.QtGui import QPainter, QIcon, QAction, QPainterPath, QColor, QPen, QBrush, QFont
@@ -226,16 +226,8 @@ class PanZoomView(QGraphicsView):
         # Draw the group name centered in the badge
         painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, group.name)
 
-        # Count the total number of notes in the group
-        note_count = 0
-        for node in nodes:
-            if hasattr(node, 'thoughts'):
-                note_count += len(node.thoughts)
-
-        # Create the text for node and note counts
+        # Create the text for node count
         node_count_text = f"{len(nodes)} nodes"
-        if note_count > 0:
-            node_count_text += f", {note_count} notes"
 
         font.setPointSize(6)
         painter.setFont(font)
@@ -726,12 +718,15 @@ class MainWindow(QMainWindow):
         # Add a separator and label for the tag filter
         toolbar.addWidget(QLabel("Filter by Tag:"))
 
-        # Add a combobox for filtering by tag
-        self.tag_filter = QComboBox()
-        self.tag_filter.setMinimumWidth(150)
-        self.tag_filter.addItem("All Tags")
-        self.tag_filter.currentIndexChanged.connect(self._filterByTag)
-        toolbar.addWidget(self.tag_filter)
+        # Add a button for tag filtering
+        self.tag_filter_button = QPushButton("Show/Hide Tags")
+        self.tag_filter_button.setMinimumWidth(150)
+        self.tag_filter_button.clicked.connect(self._showTagFilterMenu)
+        toolbar.addWidget(self.tag_filter_button)
+
+        # Initialize tag visibility tracking
+        self.visible_tags = set()  # Empty set means all tags are visible
+        self.all_tags_visible = True
 
         # Add a separator
         separator = QFrame()
@@ -742,12 +737,15 @@ class MainWindow(QMainWindow):
         # Add a label for the group visibility
         toolbar.addWidget(QLabel("Show/Hide Groups:"))
 
-        # Add a combobox for toggling group visibility
-        self.group_visibility = QComboBox()
-        self.group_visibility.setMinimumWidth(150)
-        self.group_visibility.addItem("All Groups")
-        self.group_visibility.currentIndexChanged.connect(self._toggleGroupVisibility)
-        toolbar.addWidget(self.group_visibility)
+        # Add a button for group visibility
+        self.group_visibility_button = QPushButton("Show/Hide Groups")
+        self.group_visibility_button.setMinimumWidth(150)
+        self.group_visibility_button.clicked.connect(self._showGroupVisibilityMenu)
+        toolbar.addWidget(self.group_visibility_button)
+
+        # Initialize group visibility tracking
+        self.visible_groups = set()  # Empty set means all groups are visible
+        self.all_groups_visible = True
 
         # Add the toolbar to the layout
         vbox.addWidget(toolbar, 0)  # no stretch
@@ -869,49 +867,51 @@ class MainWindow(QMainWindow):
         self._updateGroupVisibility()
 
     def _updateTagFilter(self):
-        """Update the tag filter dropdown with all tags in the scene"""
-        # Save the current selection
-        current_text = self.tag_filter.currentText()
-
-        # Clear the dropdown
-        self.tag_filter.clear()
-        self.tag_filter.addItem("All Tags")
-
+        """Update the tag filter with all tags in the scene"""
         # Get all tags from all nodes in the scene
         all_tags = set()
         for item in self.scene.items():
             if isinstance(item, Node) and hasattr(item, 'tags'):
                 all_tags.update(item.tags)
 
-        # Add all tags to the dropdown
-        for tag in sorted(all_tags):
-            self.tag_filter.addItem(tag)
+        # If we have visible tags but some are no longer in the scene, remove them
+        if self.visible_tags:
+            self.visible_tags = self.visible_tags.intersection(all_tags)
 
-        # Restore the previous selection if possible
-        index = self.tag_filter.findText(current_text)
-        if index >= 0:
-            self.tag_filter.setCurrentIndex(index)
+        # Update the button text to show the current state
+        if self.all_tags_visible:
+            self.tag_filter_button.setText("All Tags Visible")
+        elif not self.visible_tags:
+            self.tag_filter_button.setText("No Tags Visible")
+        elif len(self.visible_tags) == 1:
+            self.tag_filter_button.setText(f"Tag: {next(iter(self.visible_tags))}")
+        else:
+            self.tag_filter_button.setText(f"{len(self.visible_tags)} Tags Visible")
 
     def _updateGroupVisibility(self):
-        """Update the group visibility dropdown with all groups"""
-        # Save the current selection
-        current_text = self.group_visibility.currentText()
-
-        # Clear the dropdown
-        self.group_visibility.clear()
-        self.group_visibility.addItem("All Groups")
-
+        """Update the group visibility with all groups in the scene"""
         # Get all groups
         all_groups = Group.get_all_groups()
 
-        # Add all groups to the dropdown
-        for group in all_groups:
-            self.group_visibility.addItem(group.name)
+        # Get all group IDs
+        all_group_ids = {group.id for group in all_groups}
 
-        # Restore the previous selection if possible
-        index = self.group_visibility.findText(current_text)
-        if index >= 0:
-            self.group_visibility.setCurrentIndex(index)
+        # If we have visible groups but some are no longer in the scene, remove them
+        if self.visible_groups:
+            self.visible_groups = self.visible_groups.intersection(all_group_ids)
+
+        # Update the button text to show the current state
+        if self.all_groups_visible:
+            self.group_visibility_button.setText("All Groups Visible")
+        elif not self.visible_groups:
+            self.group_visibility_button.setText("No Groups Visible")
+        elif len(self.visible_groups) == 1:
+            # Find the group name for the visible group
+            group_id = next(iter(self.visible_groups))
+            group_name = next((group.name for group in all_groups if group.id == group_id), "Unknown")
+            self.group_visibility_button.setText(f"Group: {group_name}")
+        else:
+            self.group_visibility_button.setText(f"{len(self.visible_groups)} Groups Visible")
 
     def _filterByTag(self, index):
         """Filter nodes by the selected tag"""
@@ -1075,7 +1075,7 @@ class MainWindow(QMainWindow):
             "Configure GitHub Repository",
             "Enter GitHub repository URL:",
             QLineEdit.Normal,
-            ""
+            "https://github.com/coelho-silencioso/RoadM-App.git"
         )
 
         if not ok or not repo_url:
