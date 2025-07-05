@@ -866,6 +866,10 @@ class MainWindow(QMainWindow):
         self._updateTagFilter()
         self._updateGroupVisibility()
 
+        # Apply filters to ensure correct visibility
+        self._applyTagFilter()
+        self._applyGroupFilter()
+
     def _updateTagFilter(self):
         """Update the tag filter with all tags in the scene"""
         # Get all tags from all nodes in the scene
@@ -913,83 +917,250 @@ class MainWindow(QMainWindow):
         else:
             self.group_visibility_button.setText(f"{len(self.visible_groups)} Groups Visible")
 
-    def _filterByTag(self, index):
-        """Filter nodes by the selected tag"""
-        # Get the selected tag
-        tag = self.tag_filter.currentText()
+    def _showTagFilterMenu(self):
+        """Show a menu with checkable actions for each tag"""
+        # Create a menu
+        menu = QMenu(self)
 
-        # If "All Tags" is selected, show all nodes
-        if tag == "All Tags":
-            # Show all nodes
+        # Add "Show All" action
+        show_all_action = QAction("Show All Tags", menu, checkable=True)
+        show_all_action.setChecked(self.all_tags_visible)
+        show_all_action.toggled.connect(self._toggleAllTags)
+        menu.addAction(show_all_action)
+
+        # Add separator
+        menu.addSeparator()
+
+        # Get all tags from all nodes in the scene
+        all_tags = set()
+        for item in self.scene.items():
+            if isinstance(item, Node) and hasattr(item, 'tags'):
+                all_tags.update(item.tags)
+
+        # Add checkable actions for each tag
+        for tag in sorted(all_tags):
+            action = QAction(tag, menu, checkable=True)
+            # If all tags are visible, or this tag is in the visible_tags set, check it
+            action.setChecked(self.all_tags_visible or tag in self.visible_tags)
+            # Connect to a lambda that calls _toggleTagVisibility with the tag name
+            action.toggled.connect(lambda checked, t=tag: self._toggleTagVisibility(t, checked))
+            menu.addAction(action)
+
+        # Show the menu at the button's position
+        menu.exec_(self.tag_filter_button.mapToGlobal(self.tag_filter_button.rect().bottomLeft()))
+
+    def _toggleAllTags(self, checked):
+        """Toggle visibility of all tags"""
+        self.all_tags_visible = checked
+
+        # If showing all tags, clear the visible_tags set
+        if checked:
+            self.visible_tags.clear()
+
+        # Update the UI
+        self._updateTagFilter()
+
+        # Apply the filter
+        self._applyTagFilter()
+
+    def _toggleTagVisibility(self, tag, visible):
+        """Toggle visibility of a specific tag"""
+        # If we're showing all tags and we're hiding one, switch to specific mode
+        if self.all_tags_visible and not visible:
+            # Get all tags from all nodes in the scene
+            all_tags = set()
+            for item in self.scene.items():
+                if isinstance(item, Node) and hasattr(item, 'tags'):
+                    all_tags.update(item.tags)
+
+            # Add all tags except the one being hidden
+            self.visible_tags = all_tags - {tag}
+            self.all_tags_visible = False
+        # If we're in specific mode
+        elif not self.all_tags_visible:
+            if visible:
+                # Add the tag to the visible set
+                self.visible_tags.add(tag)
+            else:
+                # Remove the tag from the visible set
+                self.visible_tags.discard(tag)
+
+        # Update the UI
+        self._updateTagFilter()
+
+        # Apply the filter
+        self._applyTagFilter()
+
+    def _applyTagFilter(self):
+        """Apply the tag filter based on current visibility settings"""
+        # First, mark all nodes as not visible
+        for item in self.scene.items():
+            if isinstance(item, Node):
+                item.setVisible(False)
+
+        # If all tags are visible, show all nodes (subject to group filter)
+        if self.all_tags_visible:
+            # Show all nodes that pass the group filter
             for item in self.scene.items():
                 if isinstance(item, Node):
-                    item.setVisible(True)
-
-            # Show all connections
-            from connection import Connection
-            for item in self.scene.items():
-                if isinstance(item, Connection):
-                    item.setVisible(True)
-        else:
-            # Show only nodes with the selected tag and their connections
+                    # Only set visible if it's not hidden by group filter
+                    if self._isNodeVisibleByGroupFilter(item):
+                        item.setVisible(True)
+        # If specific tags are visible
+        elif self.visible_tags:
+            # Show only nodes with visible tags (subject to group filter)
             for item in self.scene.items():
                 if isinstance(item, Node):
-                    # Check if the node has the selected tag
-                    has_tag = hasattr(item, 'tags') and tag in item.tags
-                    item.setVisible(has_tag)
+                    # Check if the node has any visible tag
+                    has_visible_tag = hasattr(item, 'tags') and any(tag in self.visible_tags for tag in item.tags)
+                    # Only set visible if it's not hidden by group filter
+                    if has_visible_tag and self._isNodeVisibleByGroupFilter(item):
+                        item.setVisible(True)
+        # If no tags are visible, all nodes remain hidden
 
-            # Show connections between visible nodes
-            from connection import Connection
-            for item in self.scene.items():
-                if isinstance(item, Connection):
-                    # Show the connection if both nodes are visible
-                    start_visible = item.start_node.isVisible()
-                    end_visible = item.end_node.isVisible()
-                    item.setVisible(start_visible and end_visible)
+        # Update connections
+        self._updateConnectionVisibility()
 
         # Update the scene
         self.scene.update()
 
-    def _toggleGroupVisibility(self, index):
-        """Toggle the visibility of the selected group"""
-        # Get the selected group name
-        group_name = self.group_visibility.currentText()
+    def _isNodeVisibleByGroupFilter(self, node):
+        """Check if a node is visible based on the group filter"""
+        # If all groups are visible, the node is visible
+        if self.all_groups_visible:
+            return True
 
-        # If "All Groups" is selected, show all groups
-        if group_name == "All Groups":
-            # Show all nodes
+        # If no groups are visible, the node is not visible
+        if not self.visible_groups:
+            return False
+
+        # Check if the node is in a visible group
+        return hasattr(node, 'group_id') and node.group_id in self.visible_groups
+
+    def _updateConnectionVisibility(self):
+        """Update connection visibility based on node visibility"""
+        from connection import Connection
+        for item in self.scene.items():
+            if isinstance(item, Connection):
+                # Show the connection if both nodes are visible
+                start_visible = item.start_node.isVisible()
+                end_visible = item.end_node.isVisible()
+                item.setVisible(start_visible and end_visible)
+
+    def _showGroupVisibilityMenu(self):
+        """Show a menu with checkable actions for each group"""
+        # Create a menu
+        menu = QMenu(self)
+
+        # Add "Show All" action
+        show_all_action = QAction("Show All Groups", menu, checkable=True)
+        show_all_action.setChecked(self.all_groups_visible)
+        show_all_action.toggled.connect(self._toggleAllGroups)
+        menu.addAction(show_all_action)
+
+        # Add separator
+        menu.addSeparator()
+
+        # Get all groups
+        all_groups = Group.get_all_groups()
+
+        # Add checkable actions for each group
+        for group in all_groups:
+            action = QAction(group.name, menu, checkable=True)
+            # If all groups are visible, or this group is in the visible_groups set, check it
+            action.setChecked(self.all_groups_visible or group.id in self.visible_groups)
+            # Connect to a lambda that calls _toggleGroupVisibility with the group ID
+            action.toggled.connect(lambda checked, g=group.id: self._toggleGroupVisibility(g, checked))
+            menu.addAction(action)
+
+        # Show the menu at the button's position
+        menu.exec_(self.group_visibility_button.mapToGlobal(self.group_visibility_button.rect().bottomLeft()))
+
+    def _toggleAllGroups(self, checked):
+        """Toggle visibility of all groups"""
+        self.all_groups_visible = checked
+
+        # If showing all groups, clear the visible_groups set
+        if checked:
+            self.visible_groups.clear()
+
+        # Update the UI
+        self._updateGroupVisibility()
+
+        # Apply the filter
+        self._applyGroupFilter()
+
+    def _toggleGroupVisibility(self, group_id, visible):
+        """Toggle visibility of a specific group"""
+        # If we're showing all groups and we're hiding one, switch to specific mode
+        if self.all_groups_visible and not visible:
+            # Get all group IDs
+            all_groups = Group.get_all_groups()
+            all_group_ids = {group.id for group in all_groups}
+
+            # Add all groups except the one being hidden
+            self.visible_groups = all_group_ids - {group_id}
+            self.all_groups_visible = False
+        # If we're in specific mode
+        elif not self.all_groups_visible:
+            if visible:
+                # Add the group to the visible set
+                self.visible_groups.add(group_id)
+            else:
+                # Remove the group from the visible set
+                self.visible_groups.discard(group_id)
+
+        # Update the UI
+        self._updateGroupVisibility()
+
+        # Apply the filter
+        self._applyGroupFilter()
+
+    def _applyGroupFilter(self):
+        """Apply the group filter based on current visibility settings"""
+        # First, mark all nodes as not visible
+        for item in self.scene.items():
+            if isinstance(item, Node):
+                item.setVisible(False)
+
+        # If all groups are visible, show all nodes (subject to tag filter)
+        if self.all_groups_visible:
+            # Show all nodes that pass the tag filter
             for item in self.scene.items():
                 if isinstance(item, Node):
-                    item.setVisible(True)
-        else:
-            # Find the group with the selected name
-            selected_group = None
-            for group in Group.get_all_groups():
-                if group.name == group_name:
-                    selected_group = group
-                    break
-
-            if not selected_group:
-                return
-
-            # Show only nodes in the selected group
+                    # Only set visible if it's not hidden by tag filter
+                    if self._isNodeVisibleByTagFilter(item):
+                        item.setVisible(True)
+        # If specific groups are visible
+        elif self.visible_groups:
+            # Show only nodes in visible groups (subject to tag filter)
             for item in self.scene.items():
                 if isinstance(item, Node):
-                    # Check if the node is in the selected group
-                    in_group = hasattr(item, 'group_id') and item.group_id == selected_group.id
-                    item.setVisible(in_group)
+                    # Check if the node is in a visible group
+                    in_visible_group = hasattr(item, 'group_id') and item.group_id in self.visible_groups
+                    # Only set visible if it's not hidden by tag filter
+                    if in_visible_group and self._isNodeVisibleByTagFilter(item):
+                        item.setVisible(True)
+        # If no groups are visible, all nodes remain hidden
 
-            # Show connections between visible nodes
-            from connection import Connection
-            for item in self.scene.items():
-                if isinstance(item, Connection):
-                    # Show the connection if both nodes are visible
-                    start_visible = item.start_node.isVisible()
-                    end_visible = item.end_node.isVisible()
-                    item.setVisible(start_visible and end_visible)
+        # Update connections
+        self._updateConnectionVisibility()
 
         # Update the scene
         self.scene.update()
+
+    def _isNodeVisibleByTagFilter(self, node):
+        """Check if a node is visible based on the tag filter"""
+        # If all tags are visible, the node is visible
+        if self.all_tags_visible:
+            return True
+
+        # If no tags are visible, the node is not visible
+        if not self.visible_tags:
+            return False
+
+        # Check if the node has any visible tag
+        return hasattr(node, 'tags') and any(tag in self.visible_tags for tag in node.tags)
 
     def _saveProject(self):
         """Save the current project to a file"""
@@ -1058,6 +1229,10 @@ class MainWindow(QMainWindow):
             # Update the tag and group dropdowns
             self._updateTagFilter()
             self._updateGroupVisibility()
+
+            # Apply filters to ensure correct visibility
+            self._applyTagFilter()
+            self._applyGroupFilter()
         else:
             QMessageBox.critical(
                 self,
