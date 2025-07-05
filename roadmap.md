@@ -36,8 +36,8 @@
 - [x] Highlight connections when nodes are selected
 
 ### Mind Map Capabilities
-- [ ] Expand/collapse subtrees
-- [ ] Grouping and tagging of nodes
+- [x] Expand/collapse subtrees
+- [x] Grouping and tagging of nodes
 
 ### Roadmap Capabilities
 - [ ] Integrate a timeline view
@@ -49,12 +49,17 @@
 - [x] Custom styling and theming
 - [x] Zoom and pan functionality
 - [x] Border blinking effect
-- [ ] Toolbar with common actions
+- [x] Toolbar with common actions
 - [ ] Minimap overview
 
 ## Persistence & Data
-- [ ] Save/load projects (JSON serialization)
+- [x] Save/load projects (JSON serialization)
 - [ ] Autosave feature
+
+## GitHub Integration
+- [x] Configure GitHub repository
+- [x] Commit and push changes to GitHub
+- [x] Detailed instructions for GitHub usage
 
 ## Logging & Undo/Redo
 - [ ] Implement command pattern for user actions
@@ -62,7 +67,7 @@
 - [x] Log actions with timestamps and details
 
 ## Testing & Documentation
-- [ ] Error handling and confirmation dialogs
+- [x] Error handling and confirmation dialogs
 - [ ] Unit tests for core logic
 - [ ] User guide and inline documentation
 
